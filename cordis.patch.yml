@@ -1,0 +1,14 @@
+# Bundle patch applied over the selected DSH profile when this package is listed
+# in `dsh.profile.bundles`. The row id is deployment-local; the package name
+# must match package.json.
+
+- insert:
+    - id: comem
+      name: 'comem'
+      config:
+        logicalLayerCap: 102400
+
+    # Every DSH package owns an invariant companion. Keep this row when the
+    # selected base profile provides the `invariants` service.
+    - id: comem-invariant
+      name: 'comem/invariant'
