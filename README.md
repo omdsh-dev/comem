@@ -32,4 +32,4 @@ Run from this repository:
     pnpm test
     pnpm run build
 
-The implementation is DSH-specific: runtime activation uses Cordis effects, optional DSH tools/system-prompt services, and session/event observation. Native compaction is observed rather than replaced; archive callers use the same archiveCompact operation. The memory tree is not injected into the ordinary conversation surface.
+The implementation is DSH-specific: runtime activation uses Cordis effects, optional DSH tools/system-prompt services, and session/event observation. Native compaction is observed rather than replaced; archive callers use the same archiveCompact operation. The memory tree is not injected into the ordinary conversation surface. The bundle patch inserts only the `comem` runtime row because the ordinary `dsh-base`/`dsh-web-app` profile does not provide the `invariants` service. The exported `./invariant` companion can be added separately in a profile that mounts `@deepseek-ai/dsh-invariants`.
