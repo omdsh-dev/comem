@@ -8,7 +8,7 @@
       config:
         logicalLayerCap: 102400
 
-    # Every DSH package owns an invariant companion. Keep this row when the
-    # selected base profile provides the `invariants` service.
-    - id: comem-invariant
-      name: 'comem/invariant'
+    # The `./invariant` export remains available for profiles that mount
+    # `@deepseek-ai/dsh-invariants`. The ordinary dsh-base/web-app profiles do
+    # not provide that service, so do not insert the companion row here; doing
+    # so would leave it pending during startup.
