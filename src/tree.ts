@@ -215,7 +215,12 @@ export class ComemEngine {
           existingMem !== undefined
           && this.latestAbs(existingNode) === undefined
         )
-          await this.writeAbs(existingNode, existingMem, existingRecord)
+          await this.writeAbs(
+            existingNode,
+            existingMem,
+            existingRecord,
+            existingRecord.source.sessionId,
+          )
         return this.requireNode(existingNode.id)
       }
       const source: ComemSource = {
@@ -256,7 +261,7 @@ export class ComemEngine {
       const mem =
         this.latestMem(child)
         ?? (await this.writeMem(child, input.content, source, input))
-      await this.appendToParent(child, mem, input.workspaceId)
+      await this.appendToParent(child, mem, input.workspaceId, input.sessionId)
       return this.requireNode(child.id)
     })
   }
@@ -529,6 +534,7 @@ export class ComemEngine {
     child: ComemNode,
     childMem: MemRevision,
     workspaceId: string,
+    sessionId?: string,
   ): Promise<void> {
     const layer: ComemLayer = `L${Number(child.layer.slice(1)) + 1}`
     let parent = this.activeNode(layer, workspaceId)
@@ -562,6 +568,7 @@ export class ComemEngine {
       target: childMem.content,
       instruction:
         '只输出当前 child node mem 的压缩内容，不重写已有父节点内容。',
+      ...(sessionId === undefined ? {} : { sessionId }),
       ...(this.physicalBudget > 0
         ? { physicalBudget: this.physicalBudget }
         : {}),
@@ -601,19 +608,20 @@ export class ComemEngine {
     }
     await this.options.store.append(edge)
     this.apply(edge)
-    await this.writeAbs(child, childMem, record)
+    await this.writeAbs(child, childMem, record, sessionId)
     const updated = this.requireNode(parent.id)
     const estimate = updated.records.reduce(
       (total, id) => total + (this.state.records.get(id)?.tokenCount ?? 0),
       0,
     )
     if (estimate >= this.cap) {
-      await this.sealParent(updated, workspaceId)
+      await this.sealParent(updated, workspaceId, sessionId)
     }
   }
   private async sealParent(
     parent: ComemNode,
     workspaceId: string,
+    sessionId?: string,
   ): Promise<void> {
     const records = parent.records
       .map((id) => this.state.records.get(id))
@@ -626,6 +634,7 @@ export class ComemEngine {
       target: input,
       instruction:
         '压缩当前节点 Records 的重放输入，并把结果写回当前节点 mem。',
+      ...(sessionId === undefined ? {} : { sessionId }),
       ...(this.physicalBudget > 0
         ? { physicalBudget: this.physicalBudget }
         : {}),
@@ -653,7 +662,7 @@ export class ComemEngine {
       sealedMem !== undefined
       && (layerNumber < 3 || sealedMem.tokenCount < this.cap)
     ) {
-      await this.appendToParent(sealed, sealedMem, workspaceId)
+      await this.appendToParent(sealed, sealedMem, workspaceId, sessionId)
     }
   }
   private async compactWithBudget(
@@ -700,6 +709,7 @@ export class ComemEngine {
     child: ComemNode,
     mem: MemRevision,
     record: ComemRecord,
+    sessionId?: string,
   ): Promise<void> {
     try {
       const result = await this.model.summarize({
@@ -708,6 +718,7 @@ export class ComemEngine {
         target: mem.content,
         instruction:
           '只生成当前 child node 的默认摘要，不把父节点事实写成 child 事实。',
+        ...(sessionId === undefined ? {} : { sessionId }),
       })
       const revision: AbsRevision = {
         id: `${child.id}:abs:${child.absRevisionIds.length + 1}`,

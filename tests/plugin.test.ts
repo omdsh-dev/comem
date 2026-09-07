@@ -264,11 +264,23 @@ describe('comem loader lifecycle', () => {
     const ctx = new Context()
     const storage = createTestStorageDomain()
     const requests: { provider?: string; model?: string }[] = []
-    let selection = { provider: 'settings-provider', model: 'settings-model' }
+    let selection = {
+      source: 'configured' as const,
+      fallbackAttempts: 1,
+      provider: 'settings-provider',
+      model: 'settings-model',
+    }
     type Registration = (
       namespace: string,
       schema: unknown,
-      options: { base?: { provider?: string; model?: string } },
+      options: {
+        base?: {
+          source?: string
+          fallbackAttempts?: number
+          provider?: string
+          model?: string
+        }
+      },
     ) => { get: () => typeof selection }
     const register = vi.fn<Registration>(() => ({ get: () => selection }))
     const settings = { register }
@@ -307,7 +319,12 @@ describe('comem loader lifecycle', () => {
         }),
       ]),
     )
-    selection = { provider: 'updated-provider', model: 'updated-model' }
+    selection = {
+      source: 'configured',
+      fallbackAttempts: 1,
+      provider: 'updated-provider',
+      model: 'updated-model',
+    }
     await runtime.engine.recordCompact({
       operationId: 'settings-layer-updated',
       workspaceId: 'ws',

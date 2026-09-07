@@ -13,7 +13,12 @@ describe('Comem client settings page', () => {
     const scope: SettingsScope<ModelSettings> = {
       getSnapshot: () => ({
         status: 'ready',
-        value: { provider: '', model: '' },
+        value: {
+          source: 'session',
+          fallbackAttempts: 1,
+          provider: '',
+          model: '',
+        },
         writable: true,
       }),
       subscribe: () => () => {},

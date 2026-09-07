@@ -17,6 +17,7 @@ interface ConfigShape {
   /** Composition default model; the Web settings page can override it. */
   model?: string
 }
+type ModelSource = 'session' | 'configured'
 interface ResolvedConfig {
   logicalLayerCap: number
   physicalCallBudget: number
@@ -30,12 +31,24 @@ const Config: schema<ConfigShape> = schema.object({
   model: schema.string().default(''),
 })
 
-/** The user-editable model selection used by all Comem compression passes. */
-const ComemModelSettings: schema<Pick<ConfigShape, 'provider' | 'model'>> =
-  schema.object({
-    provider: schema.string().default(''),
-    model: schema.string().default(''),
-  })
+/**
+ * The user-editable model selection used by all Comem compression passes.
+ * source=session follows the originating session; source=configured uses the
+ * provider and model entered on the Comem settings page.
+ */
+const ComemModelSettings: schema<{
+  source: ModelSource
+  fallbackAttempts: number
+  provider: string
+  model: string
+}> = schema.object({
+  source: schema
+    .union([schema.const('session'), schema.const('configured')])
+    .default('session'),
+  fallbackAttempts: schema.natural().default(1),
+  provider: schema.string().default(''),
+  model: schema.string().default(''),
+})
 function resolveConfig(config: ConfigShape = {}): ResolvedConfig {
   return {
     logicalLayerCap: config.logicalLayerCap ?? DEFAULT_LOGICAL_LAYER_CAP,
@@ -51,5 +64,6 @@ export {
   Config,
   resolveConfig,
   type ConfigShape,
+  type ModelSource,
   type ResolvedConfig,
 }

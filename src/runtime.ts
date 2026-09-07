@@ -9,7 +9,7 @@ declare module 'cordis' {
 }
 
 import { ComemModelSettings, resolveConfig } from './config.ts'
-import type { ConfigShape as Config } from './config.ts'
+import type { ConfigShape as Config, ModelSource } from './config.ts'
 import type {
   ComemModel,
   ComemModelRequest,
@@ -48,6 +48,8 @@ interface StorageDomainFacility {
   open: (spec: unknown) => unknown
 }
 interface ModelSelection {
+  source: ModelSource
+  fallbackAttempts: number
   provider: string
   model: string
 }
@@ -208,7 +210,12 @@ function registerModelSettings(
   const candidate = safeGet(ctx, 'settings')
   if (!isSettingsFacility(candidate)) return undefined
   return candidate.register('comem', ComemModelSettings, {
-    base: { provider: config.provider, model: config.model },
+    base: {
+      source: 'session',
+      fallbackAttempts: 1,
+      provider: config.provider,
+      model: config.model,
+    },
     applies: 'live',
   })
 }
@@ -218,15 +225,33 @@ function createHostModel(
   settings: SettingsScope<ModelSelection> | undefined,
 ): ComemModel {
   let messageId = 0
-  const call = async (
+  const callOnce = async (
     request: ComemModelRequest,
   ): Promise<ComemModelResult> => {
     const service = safeGet(ctx, 'llm')
     if (!isHostLlm(service)) return unavailable()
-    const configured = settings?.get() ?? config
+    const configured = settings?.get() ?? {
+      source: 'session' as const,
+      fallbackAttempts: 1,
+      provider: config.provider,
+      model: config.model,
+    }
+    const session =
+      configured.source === 'session' && request.sessionId !== undefined
+        ? currentSessionModel(ctx, request.sessionId)
+        : undefined
     const provider =
-      configured.provider || stringField(service, 'provider') || ''
-    const model = configured.model || stringField(service, 'model') || ''
+      request.provider
+      || session?.provider
+      || (configured.source === 'configured'
+        ? configured.provider || config.provider
+        : '')
+    const model =
+      request.model
+      || session?.model
+      || (configured.source === 'configured'
+        ? configured.model || config.model
+        : '')
     if (provider.length === 0 || model.length === 0) return unavailable()
     const text = [request.background, request.target, request.instruction]
       .filter((value) => value.length > 0)
@@ -274,12 +299,56 @@ function createHostModel(
       ...(usage === undefined ? {} : { usage }),
     }
   }
+  const call = async (
+    request: ComemModelRequest,
+  ): Promise<ComemModelResult> => {
+    const configured = settings?.get() ?? {
+      source: 'session' as const,
+      fallbackAttempts: 1,
+      provider: config.provider,
+      model: config.model,
+    }
+    if (configured.source !== 'session' || request.sessionId === undefined)
+      return callOnce(request)
+    const attempt = async (failures: number): Promise<ComemModelResult> => {
+      try {
+        return await callOnce(request)
+      } catch (error) {
+        const nextFailures = failures + 1
+        if (nextFailures < configured.fallbackAttempts)
+          return attempt(nextFailures)
+        const provider = configured.provider || config.provider
+        const model = configured.model || config.model
+        if (provider.length === 0 || model.length === 0) throw error
+        return callOnce({ ...request, provider, model })
+      }
+    }
+    return attempt(0)
+  }
   return { compact: call, summarize: call }
 }
 interface HostLlm {
   stream: (options: unknown) => AsyncIterable<unknown>
   provider?: string
   model?: string
+}
+function currentSessionModel(
+  ctx: ComemContext,
+  sessionId: string,
+): ModelSelectionFields | undefined {
+  const sessions = safeGet(ctx, 'sessions')
+  if (!isSessionStoreLike(sessions)) return undefined
+  const config = sessions.get(sessionId)?.requestHeader?.()?.config
+  if (!isRecord(config)) return undefined
+  const provider = stringField(config, 'provider')
+  const model = stringField(config, 'model')
+  return provider !== undefined && model !== undefined
+    ? { provider, model }
+    : undefined
+}
+interface ModelSelectionFields {
+  provider: string
+  model: string
 }
 function numericRecord(value: unknown): Record<string, number> | undefined {
   if (!isRecord(value)) return undefined
@@ -408,7 +477,7 @@ function createSessionArchiveProvider(
   ctx: Context,
 ): ComemArchiveProvider | undefined {
   const sessions = safeGet(ctx, 'sessions')
-  if (!isSessionStore(sessions)) return undefined
+  if (!isSessionStoreLike(sessions)) return undefined
   return {
     compactSession: async (sessionId) => {
       const session = sessions.get(sessionId)
@@ -428,9 +497,12 @@ interface SessionStoreLike {
 }
 interface LiveSessionLike {
   deriveMessages: () => readonly unknown[]
+  requestHeader?: () =>
+    | { config?: { provider?: string; model?: string } }
+    | undefined
   header?: Record<string, unknown>
 }
-function isSessionStore(value: unknown): value is SessionStoreLike {
+function isSessionStoreLike(value: unknown): value is SessionStoreLike {
   return isRecord(value) && typeof value.get === 'function'
 }
 function sessionWorkspace(session: LiveSessionLike): string {

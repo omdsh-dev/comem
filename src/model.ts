@@ -5,6 +5,11 @@ export interface ComemModelRequest {
   readonly background: string
   readonly target: string
   readonly instruction: string
+  /** Session whose active request model should be used in session mode. */
+  readonly sessionId?: string
+  /** Internal provider/model override used by fallback attempts. */
+  readonly provider?: string
+  readonly model?: string
   readonly physicalBudget?: number
 }
 

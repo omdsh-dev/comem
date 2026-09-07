@@ -9,6 +9,12 @@ const locales = {
     title: 'Comem 多层压缩模型',
     description:
       '选择 Comem 生成层级摘要和压缩结果时使用的 provider 与 model。',
+    source: '压缩使用的模型',
+    session: '使用当前会话模型',
+    configured: '使用单独配置的模型',
+    sessionDescription: '跟随当前会话最近一次请求所使用的模型。',
+    configuredDescription: '使用下面单独配置的 provider 和 model。',
+    fallbackAttempts: '当前会话失败次数后回退',
     provider: 'Provider',
     model: 'Model',
     providerPlaceholder: '例如 deepseek 或 pi-ai',
@@ -23,6 +29,14 @@ const locales = {
     title: 'Comem multi-layer compression model',
     description:
       'Choose the provider and model Comem uses for hierarchical summaries and compression.',
+    source: 'Compression model source',
+    session: 'Use the current session model',
+    configured: 'Use a separately configured model',
+    sessionDescription:
+      "Follow the model used by the current session's latest request.",
+    configuredDescription:
+      'Use the separately configured provider and model below.',
+    fallbackAttempts: 'Session failures before fallback',
     provider: 'Provider',
     model: 'Model',
     providerPlaceholder: 'For example, deepseek or pi-ai',
@@ -34,7 +48,10 @@ const locales = {
   },
 } as const
 
+export type ModelSource = 'session' | 'configured'
 export interface ModelSettings {
+  source: ModelSource
+  fallbackAttempts: number
   provider: string
   model: string
 }
@@ -95,21 +112,44 @@ function ComemSettingsPage({
     (listener) => scope.subscribe(listener),
     () => scope.getSnapshot(),
   )
-  const resolved = snapshot.value ?? { provider: '', model: '' }
+  const resolved = snapshot.value ?? {
+    source: 'session' as const,
+    fallbackAttempts: 1,
+    provider: '',
+    model: '',
+  }
+  const [source, setSource] = useState<ModelSource>(resolved.source)
+  const [fallbackAttempts, setFallbackAttempts] = useState(
+    resolved.fallbackAttempts,
+  )
   const [provider, setProvider] = useState(resolved.provider)
   const [model, setModel] = useState(resolved.model)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   useEffect(() => {
+    setSource(resolved.source)
+    setFallbackAttempts(resolved.fallbackAttempts)
     setProvider(resolved.provider)
     setModel(resolved.model)
-  }, [resolved.provider, resolved.model])
+  }, [
+    resolved.source,
+    resolved.fallbackAttempts,
+    resolved.provider,
+    resolved.model,
+  ])
   const disabled = saving || snapshot.status !== 'ready' || !snapshot.writable
+  const configured = source === 'configured'
   const save = async () => {
     setSaving(true)
     setMessage('')
     try {
       await scope.mutate([
+        { op: 'set', path: ['source'], value: source },
+        {
+          op: 'set',
+          path: ['fallbackAttempts'],
+          value: Math.max(0, Math.floor(fallbackAttempts)),
+        },
         { op: 'set', path: ['provider'], value: provider.trim() },
         { op: 'set', path: ['model'], value: model.trim() },
       ])
@@ -131,11 +171,56 @@ function ComemSettingsPage({
       createElement(
         'span',
         { style: { display: 'block', marginBottom: 6 } },
+        t('source'),
+      ),
+      createElement(
+        'select',
+        {
+          value: source,
+          disabled,
+          onChange: (event: { target: { value: ModelSource } }) =>
+            setSource(event.target.value),
+          style: { width: '100%', boxSizing: 'border-box', padding: 8 },
+        },
+        createElement('option', { value: 'session' }, t('session')),
+        createElement('option', { value: 'configured' }, t('configured')),
+      ),
+      createElement(
+        'span',
+        { style: { display: 'block', marginTop: 6, opacity: 0.72 } },
+        configured ? t('configuredDescription') : t('sessionDescription'),
+      ),
+    ),
+    createElement(
+      'label',
+      { style: { display: 'block', marginTop: 16 } },
+      createElement(
+        'span',
+        { style: { display: 'block', marginBottom: 6 } },
+        t('fallbackAttempts'),
+      ),
+      createElement('input', {
+        type: 'number',
+        min: 0,
+        step: 1,
+        value: fallbackAttempts,
+        disabled,
+        onChange: (event: { target: { value: string } }) =>
+          setFallbackAttempts(Number(event.target.value)),
+        style: { width: '100%', boxSizing: 'border-box', padding: 8 },
+      }),
+    ),
+    createElement(
+      'label',
+      { style: { display: 'block', marginTop: 16 } },
+      createElement(
+        'span',
+        { style: { display: 'block', marginBottom: 6 } },
         t('provider'),
       ),
       createElement('input', {
         value: provider,
-        disabled,
+        disabled: disabled || !configured,
         placeholder: t('providerPlaceholder'),
         onChange: (event: { target: { value: string } }) =>
           setProvider(event.target.value),
@@ -152,7 +237,7 @@ function ComemSettingsPage({
       ),
       createElement('input', {
         value: model,
-        disabled,
+        disabled: disabled || !configured,
         placeholder: t('modelPlaceholder'),
         onChange: (event: { target: { value: string } }) =>
           setModel(event.target.value),
