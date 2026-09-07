@@ -1,7 +1,4 @@
 /** Cordis activation and the fakeable host adapter for comem. */
-import { homedir } from 'node:os'
-import { join } from 'node:path'
-
 import type { Context } from 'cordis'
 
 declare module 'cordis' {
@@ -18,11 +15,7 @@ import type {
   ComemModelRequest,
   ComemModelResult,
 } from './model.ts'
-import {
-  DomainComemStore,
-  JsonlComemStore,
-  MemoryComemStore,
-} from './storage.ts'
+import { DomainComemStore } from './storage.ts'
 import type { ComemDomain } from './storage.ts'
 import { ComemEngine } from './tree.ts'
 import type { ComemEngineOptions } from './tree.ts'
@@ -52,7 +45,7 @@ interface PromptRuntime {
 type ComemContext = Context
 
 interface StorageDomainFacility {
-  open: (spec: unknown) => Promise<ComemDomain>
+  open: (spec: unknown) => unknown
 }
 const comemDomainSpec = {
   name: 'comem',
@@ -60,13 +53,28 @@ const comemDomainSpec = {
   layout: 'per-record' as const,
   tables: { events: { valueSchema: { parse: (value: unknown) => value } } },
 }
-async function openStorageDomain(
-  ctx: Context,
-): Promise<ComemDomain | undefined> {
+async function openStorageDomain(ctx: Context): Promise<ComemDomain> {
   const candidate =
     typeof ctx.get === 'function' ? ctx.get('storageDomain', false) : undefined
-  if (!isStorageDomainFacility(candidate)) return undefined
-  return candidate.open(comemDomainSpec)
+  if (!isStorageDomainFacility(candidate)) {
+    throw new Error(
+      'comem requires the DSH storageDomain service and cannot start without it',
+    )
+  }
+  let domain: unknown
+  try {
+    domain = await candidate.open(comemDomainSpec)
+  } catch (error) {
+    throw new Error(
+      "comem could not open the DSH storageDomain 'comem' domain: "
+        + (error instanceof Error ? error.message : String(error)),
+      { cause: error },
+    )
+  }
+  if (!isDomain(domain)) {
+    throw new Error('comem storageDomain.open() did not return a usable domain')
+  }
+  return domain
 }
 function isStorageDomainFacility(
   value: unknown,
@@ -77,46 +85,57 @@ function isStorageDomainFacility(
 export async function createComemRuntime(
   ctx: Context,
   config: Config,
-  options: Partial<ComemEngineOptions> = {},
+  options: Omit<Partial<ComemEngineOptions>, 'store'> = {},
 ): Promise<ComemRuntime> {
   const resolved = resolveConfig(config)
-  const injected =
-    typeof ctx.get === 'function' ? ctx.get('comemStore', false) : undefined
-  const injectedDomain =
-    typeof ctx.get === 'function' ? ctx.get('comemDomain', false) : undefined
-  const ownedDomain =
-    options.store === undefined && !isDomain(injectedDomain)
-      ? await openStorageDomain(ctx)
-      : undefined
-  const domain = isDomain(injectedDomain) ? injectedDomain : ownedDomain
-  const store =
-    options.store
-    ?? (isStore(injected)
-      ? injected
-      : domain === undefined
-        ? new JsonlComemStore(resolvePath(resolved.storageDir))
-        : new DomainComemStore(domain))
-  const model = options.model ?? createHostModel(ctx, resolved)
-  const engine = new ComemEngine({
-    ...options,
-    store,
-    model,
-    logicalLayerCap: options.logicalLayerCap ?? resolved.logicalLayerCap,
-    physicalCallBudget:
-      options.physicalCallBudget ?? resolved.physicalCallBudget,
-  })
-  return {
-    engine,
-    async close(): Promise<void> {
-      await engine.waitReady()
-      if (ownedDomain?.close !== undefined) await ownedDomain.close()
-    },
+  const domain = await openStorageDomain(ctx)
+  try {
+    const store = new DomainComemStore(domain)
+    const model = options.model ?? createHostModel(ctx, resolved)
+    const engine = new ComemEngine({
+      ...options,
+      store,
+      model,
+      logicalLayerCap: options.logicalLayerCap ?? resolved.logicalLayerCap,
+      physicalCallBudget:
+        options.physicalCallBudget ?? resolved.physicalCallBudget,
+    })
+    let closePromise: Promise<void> | undefined
+    return {
+      engine,
+      close(): Promise<void> {
+        closePromise ??= (async () => {
+          try {
+            await engine.waitReady()
+          } finally {
+            if (domain.close !== undefined) await domain.close()
+          }
+        })()
+        return closePromise
+      },
+    }
+  } catch (error) {
+    try {
+      if (domain.close !== undefined) await domain.close()
+    } catch {
+      // Preserve the original runtime construction error.
+    }
+    throw error
   }
 }
 
 export async function apply(ctx: Context, config: Config): Promise<void> {
   const runtime = await createComemRuntime(ctx, config)
-  await runtime.engine.waitReady()
+  try {
+    await runtime.engine.waitReady()
+  } catch (error) {
+    try {
+      await runtime.close()
+    } catch {
+      // Preserve the engine startup error; close() already attempted domain cleanup.
+    }
+    throw error
+  }
   const host: ComemContext = ctx
   const removeService = host.provide('comem', runtime.engine)
   const disposers: (() => void)[] = []
@@ -143,11 +162,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     disposers.push(nativeDispose)
   }
   ctx.effect(
-    () => () => {
-      for (const dispose of disposers.splice(0).toReversed()) {
-        dispose()
+    () => async () => {
+      try {
+        for (const dispose of disposers.splice(0).toReversed()) {
+          dispose()
+        }
+      } finally {
+        await runtime.close()
       }
-      void runtime.close()
     },
     'comem.dispose',
   )
@@ -308,11 +330,6 @@ function registerTools(
       },
     }),
   ]
-}
-function resolvePath(path: string): string {
-  return path.startsWith('~/')
-    ? join(homedir(), path.slice(2), 'events.jsonl')
-    : join(path, 'events.jsonl')
 }
 
 interface PendingNative {
@@ -601,17 +618,3 @@ function isDomain(value: unknown): value is ComemDomain {
     && typeof value.table === 'function'
   )
 }
-function isStore(value: unknown): value is {
-  append: ComemEngineOptions['store']['append']
-  read: ComemEngineOptions['store']['read']
-} {
-  return (
-    typeof value === 'object'
-    && value !== null
-    && 'append' in value
-    && typeof value.append === 'function'
-    && 'read' in value
-    && typeof value.read === 'function'
-  )
-}
-export { MemoryComemStore }

@@ -1,8 +1,15 @@
 import { Context } from 'cordis'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ComemEngine, DomainComemStore, MemoryComemStore } from '#src/index'
+import {
+  ComemEngine,
+  DomainComemStore,
+  MemoryComemStore,
+  createComemRuntime,
+} from '#src/index'
 import type { ComemModel, ComemModelRequest } from '#src/index'
+
+import { createTestStorageDomain } from './harness.ts'
 
 class RecordingModel implements ComemModel {
   readonly requests: ComemModelRequest[] = []
@@ -192,10 +199,11 @@ describe('comem tree', () => {
       content: 'ignored duplicate',
     })
     expect(values.size).toBeGreaterThan(0)
+    expect([...values.keys()]).toContain('event-00000000000000000001')
     expect((await engine.search('domain durable')).length).toBe(1)
   })
 
-  it('restores JSONL events into a new engine', async () => {
+  it('restores persisted events into a new engine', async () => {
     const store = new MemoryComemStore()
     const first = new ComemEngine({ store })
     await first.recordCompact({
@@ -214,15 +222,58 @@ describe('comem loader lifecycle', () => {
     const plugin = await import('#src/index')
     expect('default' in plugin).toBeFalsy()
     expect(plugin.name).toBe('comem')
-    expect(plugin.inject).toStrictEqual([])
+    expect(plugin.inject).toStrictEqual(['storageDomain'])
     const ctx = new Context()
     const provide = vi.spyOn(ctx, 'provide')
-    const fiber = await ctx.plugin(plugin, {
-      storageDir: '/tmp/comem-test-do-not-use',
-    })
+    const storage = createTestStorageDomain()
+    ctx.provide('storageDomain', storage.service)
+    const fiber = await ctx.plugin(plugin, {})
     expect(provide).toHaveBeenCalledWith('comem', expect.anything())
+    expect(storage.open).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'comem',
+        version: 1,
+        layout: 'per-record',
+      }),
+    )
+    expect(storage.open).toHaveBeenCalledTimes(1)
     await fiber.dispose()
+    expect(storage.close).toHaveBeenCalledTimes(1)
     expect(ctx.get('comem', false)).toBeUndefined()
+  })
+
+  it('cannot create a runtime without storageDomain', async () => {
+    await expect(createComemRuntime(new Context(), {})).rejects.toThrow(
+      'comem requires the DSH storageDomain service',
+    )
+  })
+
+  it('cannot create a runtime when storageDomain cannot open comem', async () => {
+    const ctx = new Context()
+    ctx.provide('storageDomain', {
+      open: async () => {
+        throw new Error('storage backend unavailable')
+      },
+    })
+    await expect(createComemRuntime(ctx, {})).rejects.toThrow(
+      "comem could not open the DSH storageDomain 'comem' domain",
+    )
+  })
+
+  it('does not activate when storageDomain cannot open comem', async () => {
+    const plugin = await import('#src/index')
+    const ctx = new Context()
+    ctx.provide('storageDomain', {
+      open: async () => {
+        throw new Error('storage backend unavailable')
+      },
+    })
+    const fiber = ctx.plugin(plugin, {})
+    await expect(fiber).rejects.toThrow(
+      "comem could not open the DSH storageDomain 'comem' domain",
+    )
+    expect(ctx.get('comem', false)).toBeUndefined()
+    await fiber.dispose()
   })
 
   it('keeps the tools receiver while registering and disposing tools', async () => {
@@ -242,8 +293,9 @@ describe('comem loader lifecycle', () => {
 
     const ctx = new Context()
     const tools = new ToolHost()
+    const storage = createTestStorageDomain()
     ctx.provide('tools', tools)
-    ctx.provide('comemStore', new MemoryComemStore())
+    ctx.provide('storageDomain', storage.service)
     const plugin = await import('#src/index')
     const fiber = await ctx.plugin(plugin, {})
     expect(tools.layers.names).toStrictEqual([

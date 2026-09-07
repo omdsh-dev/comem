@@ -1,10 +1,6 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-
 import { describe, expect, it } from 'vitest'
 
-import { ComemEngine, DomainComemStore, JsonlComemStore } from '#src/index'
+import { ComemEngine, DomainComemStore } from '#src/index'
 import type { ComemEvent } from '#src/index'
 import type { ComemDomain, ComemDomainTable } from '#src/storage'
 
@@ -96,27 +92,11 @@ describe('comem durable stores', () => {
         event.type === 'node' ? event.node.id : '',
       ),
     ).toEqual(['a', 'b', 'c'])
-  })
-
-  it('rejects invalid and truncated JSONL records', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'comem-storage-'))
-    try {
-      const path = join(directory, 'events.jsonl')
-      await writeFile(
-        path,
-        JSON.stringify({ type: 'node', node: { id: 'broken' } }) + '\n',
-        'utf8',
-      )
-      await expect(new JsonlComemStore(path).read()).rejects.toThrow(
-        /invalid comem JSONL record/,
-      )
-      await writeFile(path, '{"type":"node"', 'utf8')
-      await expect(new JsonlComemStore(path).read()).rejects.toThrow(
-        /invalid comem JSONL record/,
-      )
-    } finally {
-      await rm(directory, { recursive: true, force: true })
-    }
+    expect([...values.keys()]).toEqual([
+      'event-00000000000000000001',
+      'event-00000000000000000002',
+      'event-00000000000000000003',
+    ])
   })
 
   it('propagates write failures and continues after a failed domain write', async () => {
@@ -140,16 +120,5 @@ describe('comem durable stores', () => {
         event.type === 'node' ? event.node.id : '',
       ),
     ).toEqual(['ok'])
-  })
-
-  it('propagates JSONL write failures', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'comem-storage-'))
-    try {
-      await expect(
-        new JsonlComemStore(directory).append(nodeEvent('x', 'ws')),
-      ).rejects.toBeTruthy()
-    } finally {
-      await rm(directory, { recursive: true, force: true })
-    }
   })
 })
