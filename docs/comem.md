@@ -793,7 +793,7 @@ Record 是父层保留新内容的关键记录。它必须保存 child node、ch
 
 ### 9.2 落盘方案
 
-沿用此前的方案 A，通过 ctx.storageDomain 使用 DSH_HOME 下的 comem 存储域。逻辑记录至少包括：
+采用方案 A，Comem 强制通过 `ctx.storageDomain` 使用 DSH_HOME 下的 `comem` 存储域；DSH 默认 JSON backend 的记录路径为 `$DSH_HOME/storages/comem/events/`。runtime 必须在创建 engine 前成功打开该 domain；如果 `storageDomain` 服务不存在、打开失败或返回不可用 domain，插件创建失败并停止，不使用任何文件 fallback。逻辑记录至少包括：
 
 - nodes：节点元数据、所属 layer、children、active/sealed 状态；
 - mem revisions：每次独立 compact 产生的节点 mem；
@@ -804,7 +804,7 @@ Record 是父层保留新内容的关键记录。它必须保存 child node、ch
 
 一次 child append 的持久化顺序是：先写 child node.mem，再确定一次性背景，再写 Record，再写 parent-child edge，最后根据 Records 的 token 总量或 replay 结果更新容量估算。若 parent L2_node/L3_node 因本次追加而满，再写该节点自己的 layer mem revision，创建下一个 active 同层节点；下一节点的第一个 Record 才可以一次性读取这个 mem。
 
-comem.md 中的 JSONL 要求表达的是可追加、可重放、可追溯的记录语义。若最终要求物理文件也必须是 JSONL，则 storage-domain 后端需要提供 append/replay 层；不能把普通 per-record JSON 文档直接称为 JSONL。无论物理后端怎样实现，mem、Record、edge 和来源记录都必须具备 append-only 的恢复能力。
+Comem 的逻辑记录要求保持可追加、可重放、可追溯；物理持久化完全由 DSH `storageDomain` 的后端负责。当前 per-record JSON backend 会将 `comem/events` 表中的记录分别保存为文档，不把普通 JSON 文档称为 JSONL。无论后端怎样实现，mem、Record、edge 和来源记录都必须具备 append-only 的恢复能力。
 
 ### 9.3 schema 草案
 

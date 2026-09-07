@@ -1,8 +1,5 @@
 /** Append-only persistence used by the comem state machine. */
 
-import { appendFile, mkdir, readFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
-
 import type { ComemEvent, ComemNode, ComemRecord, ComemSource } from './tree.ts'
 
 export interface ComemStore {
@@ -19,16 +16,16 @@ export interface ComemDomain {
   close?: () => Promise<void>
 }
 
-/** Adapter for an already-open DSH storage-domain table named events. */
+/** Required adapter for the DSH storageDomain's events table. */
 export class DomainComemStore implements ComemStore {
   private readonly events: ComemDomainTable
   private nextSequence = 0
   private writes: Promise<void> = Promise.resolve()
   constructor(domain: ComemDomain, tableName = 'events') {
     this.events = domain.table(tableName)
-    for (const [key, event] of this.events.entries()) {
+    for (const [key, event] of orderedEntries(this.events)) {
       parseEvent(event)
-      const match = /^event:(\d+)$/.exec(key)
+      const match = /^event-(\d+)$/.exec(key)
       if (match !== null)
         this.nextSequence = Math.max(this.nextSequence, Number(match[1]))
     }
@@ -39,14 +36,14 @@ export class DomainComemStore implements ComemStore {
       let key: string
       do {
         this.nextSequence += 1
-        key = 'event:' + String(this.nextSequence).padStart(20, '0')
+        key = 'event-' + String(this.nextSequence).padStart(20, '0')
       } while (this.events.get(key) !== undefined)
       await this.events.put(key, structuredClone(checked))
     })
   }
   read(): Promise<ComemEvent[]> {
     return Promise.resolve(
-      [...this.events.entries()].map(([, event]) =>
+      orderedEntries(this.events).map(([, event]) =>
         structuredClone(parseEvent(event)),
       ),
     )
@@ -59,6 +56,12 @@ export class DomainComemStore implements ComemStore {
     )
     return result
   }
+}
+
+function orderedEntries(table: ComemDomainTable): [string, ComemEvent][] {
+  return [...table.entries()].toSorted(([left], [right]) =>
+    left.localeCompare(right),
+  )
 }
 
 export class MemoryComemStore implements ComemStore {
@@ -80,54 +83,6 @@ export class MemoryComemStore implements ComemStore {
     return Promise.resolve(
       this.events.map((event) => structuredClone(parseEvent(event))),
     )
-  }
-}
-
-export class JsonlComemStore implements ComemStore {
-  private writes: Promise<void> = Promise.resolve()
-  constructor(private readonly filePath: string) {}
-  append(event: ComemEvent): Promise<void> {
-    const checked = parseEvent(event)
-    return this.serialize(async () => {
-      await mkdir(dirname(this.filePath), { recursive: true })
-      await appendFile(this.filePath, JSON.stringify(checked) + '\n', 'utf8')
-    })
-  }
-  async read(): Promise<ComemEvent[]> {
-    let text: string
-    try {
-      text = await readFile(this.filePath, 'utf8')
-    } catch (error) {
-      if (isMissingFile(error)) return []
-      throw error
-    }
-    if (text.length === 0) return []
-    const lines = text.split('\n')
-    if (lines.at(-1) === '') lines.pop()
-    return lines.map((line, index) => {
-      const normalized = line.endsWith('\r') ? line.slice(0, -1) : line
-      if (normalized.trim() === '')
-        throw new Error('invalid comem JSONL record at line ' + (index + 1))
-      try {
-        return parseEvent(JSON.parse(normalized))
-      } catch (error) {
-        throw new Error(
-          'invalid comem JSONL record at line '
-            + (index + 1)
-            + ': '
-            + (error instanceof Error ? error.message : String(error)),
-          { cause: error },
-        )
-      }
-    })
-  }
-  private serialize(task: () => Promise<void>): Promise<void> {
-    const result = this.writes.then(task, task)
-    this.writes = result.then(
-      () => undefined,
-      () => undefined,
-    )
-    return result
   }
 }
 
@@ -282,7 +237,4 @@ function isFiniteNumber(value: unknown): value is number {
 }
 function isNumberRecord(value: unknown): value is Record<string, number> {
   return isRecord(value) && Object.values(value).every(isFiniteNumber)
-}
-function isMissingFile(error: unknown): boolean {
-  return isRecord(error) && error.code === 'ENOENT'
 }
