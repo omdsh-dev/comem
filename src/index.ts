@@ -1,7 +1,7 @@
 /** DSH comem memory-tree plugin. */
 const name = 'comem'
 const inject: string[] = ['storageDomain']
-export { Config, resolveConfig } from './config.ts'
+export { ComemModelSettings, Config, resolveConfig } from './config.ts'
 export type { ConfigShape as ComemConfig, ResolvedConfig } from './config.ts'
 export { apply, archiveSession, createComemRuntime } from './runtime.ts'
 export type {

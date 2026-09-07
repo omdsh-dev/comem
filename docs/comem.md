@@ -117,6 +117,20 @@ compact(L2_compactInput)
 
 ---
 
+## 0.1 模型设置与运行时优先级
+
+Comem 注册持久化的 DSH settings namespace comem，字段为 provider 和 model。Web client 通过 settings.section slot 提供 Comem 设置页；页面写入由 DSH settings service 持久化，不写入 Comem 的事件表，也不创建额外文件。
+
+每次模型调用都会读取当前设置，因此设置页的修改不需要重启插件，并会影响 append、layer 和 archive 压缩。每个字段按以下顺序解析：
+
+1. comem settings 中的非空用户值；
+2. 插件配置中对应的 provider/model 组合默认值；
+3. 主机 LLM service 暴露的 provider/model。
+
+如果最终 provider 或 model 为空，调用会失败并明确报告 Comem 需要主机 LLM service；测试用的 MemoryComemStore 和 localComemModel 不属于生产运行时路径。
+
+---
+
 ## 1. 目标、边界与容量
 
 ### 1.1 目标

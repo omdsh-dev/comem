@@ -1,7 +1,8 @@
 # Bundle patch applied over the selected DSH profile when this package is listed
 # in `dsh.profile.bundles`. The row id is deployment-local; the package name
 # must match package.json. Comem requires the profile to provide storageDomain;
-# it does not provide a filesystem or JSONL persistence fallback.
+# it does not provide a filesystem or JSONL persistence fallback. The standard
+# Web profile also supplies the DSH settings service used by the Comem settings page.
 
 - insert:
     - id: comem

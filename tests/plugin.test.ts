@@ -260,6 +260,70 @@ describe('comem loader lifecycle', () => {
     )
   })
 
+  it('registers persistent model settings and applies them to layer compression', async () => {
+    const ctx = new Context()
+    const storage = createTestStorageDomain()
+    const requests: { provider?: string; model?: string }[] = []
+    let selection = { provider: 'settings-provider', model: 'settings-model' }
+    type Registration = (
+      namespace: string,
+      schema: unknown,
+      options: { base?: { provider?: string; model?: string } },
+    ) => { get: () => typeof selection }
+    const register = vi.fn<Registration>(() => ({ get: () => selection }))
+    const settings = { register }
+    ctx.provide('storageDomain', storage.service)
+    ctx.provide('settings', settings)
+    ctx.provide('llm', {
+      stream: async function* (options: { provider?: string; model?: string }) {
+        requests.push(options)
+        yield { type: 'text-delta', text: 'compressed' }
+      },
+    })
+    const runtime = await createComemRuntime(
+      ctx,
+      {},
+      {
+        logicalLayerCap: 1,
+        tokenEstimator: () => 1,
+      },
+    )
+    await runtime.engine.recordCompact({
+      operationId: 'settings-layer',
+      workspaceId: 'ws',
+      content: 'content',
+    })
+    expect(settings.register).toHaveBeenCalledWith(
+      'comem',
+      expect.anything(),
+      expect.objectContaining({ applies: 'live' }),
+    )
+    expect(requests.length).toBeGreaterThan(0)
+    expect(requests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          provider: 'settings-provider',
+          model: 'settings-model',
+        }),
+      ]),
+    )
+    selection = { provider: 'updated-provider', model: 'updated-model' }
+    await runtime.engine.recordCompact({
+      operationId: 'settings-layer-updated',
+      workspaceId: 'ws',
+      content: 'updated content',
+    })
+    expect(requests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          provider: 'updated-provider',
+          model: 'updated-model',
+        }),
+      ]),
+    )
+    await runtime.close()
+  })
+
   it('does not activate when storageDomain cannot open comem', async () => {
     const plugin = await import('#src/index')
     const ctx = new Context()

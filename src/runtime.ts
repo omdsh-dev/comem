@@ -8,7 +8,7 @@ declare module 'cordis' {
   }
 }
 
-import { resolveConfig } from './config.ts'
+import { ComemModelSettings, resolveConfig } from './config.ts'
 import type { ConfigShape as Config } from './config.ts'
 import type {
   ComemModel,
@@ -47,6 +47,20 @@ type ComemContext = Context
 interface StorageDomainFacility {
   open: (spec: unknown) => unknown
 }
+interface ModelSelection {
+  provider: string
+  model: string
+}
+interface SettingsScope<T> {
+  get: () => T
+}
+interface SettingsFacility {
+  register: (
+    namespace: string,
+    schema: unknown,
+    options?: { base?: Partial<ModelSelection>; applies?: 'live' | 'restart' },
+  ) => SettingsScope<ModelSelection>
+}
 const comemDomainSpec = {
   name: 'comem',
   version: 1,
@@ -81,6 +95,9 @@ function isStorageDomainFacility(
 ): value is StorageDomainFacility {
   return isRecord(value) && typeof value.open === 'function'
 }
+function isSettingsFacility(value: unknown): value is SettingsFacility {
+  return isRecord(value) && typeof value.register === 'function'
+}
 
 export async function createComemRuntime(
   ctx: Context,
@@ -90,8 +107,9 @@ export async function createComemRuntime(
   const resolved = resolveConfig(config)
   const domain = await openStorageDomain(ctx)
   try {
+    const modelSettings = registerModelSettings(ctx, resolved)
     const store = new DomainComemStore(domain)
-    const model = options.model ?? createHostModel(ctx, resolved)
+    const model = options.model ?? createHostModel(ctx, resolved, modelSettings)
     const engine = new ComemEngine({
       ...options,
       store,
@@ -177,25 +195,39 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
 
 function unavailable(): Promise<ComemModelResult> {
   return Promise.reject(
-    new Error('comem requires the DSH llm service for model-backed compaction'),
+    new Error(
+      'comem requires a compression provider and model; configure Settings > Comem',
+    ),
   )
 }
 
+function registerModelSettings(
+  ctx: Context,
+  config: { provider: string; model: string },
+): SettingsScope<ModelSelection> | undefined {
+  const candidate = safeGet(ctx, 'settings')
+  if (!isSettingsFacility(candidate)) return undefined
+  return candidate.register('comem', ComemModelSettings, {
+    base: { provider: config.provider, model: config.model },
+    applies: 'live',
+  })
+}
 function createHostModel(
   ctx: Context,
   config: { provider: string; model: string },
+  settings: SettingsScope<ModelSelection> | undefined,
 ): ComemModel {
-  const service = ctx.get('llm', false)
-  if (!isHostLlm(service))
-    return { compact: unavailable, summarize: unavailable }
-  const provider = stringField(service, 'provider') ?? config.provider
-  const model = stringField(service, 'model') ?? config.model
-  if (provider.length === 0 || model.length === 0)
-    return { compact: unavailable, summarize: unavailable }
   let messageId = 0
   const call = async (
     request: ComemModelRequest,
   ): Promise<ComemModelResult> => {
+    const service = safeGet(ctx, 'llm')
+    if (!isHostLlm(service)) return unavailable()
+    const configured = settings?.get() ?? config
+    const provider =
+      configured.provider || stringField(service, 'provider') || ''
+    const model = configured.model || stringField(service, 'model') || ''
+    if (provider.length === 0 || model.length === 0) return unavailable()
     const text = [request.background, request.target, request.instruction]
       .filter((value) => value.length > 0)
       .join('\n\n')

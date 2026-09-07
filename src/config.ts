@@ -12,7 +12,9 @@ const DEFAULT_PHYSICAL_CALL_BUDGET = 0
 interface ConfigShape {
   logicalLayerCap?: number
   physicalCallBudget?: number
+  /** Composition default provider; the Web settings page can override it. */
   provider?: string
+  /** Composition default model; the Web settings page can override it. */
   model?: string
 }
 interface ResolvedConfig {
@@ -27,6 +29,13 @@ const Config: schema<ConfigShape> = schema.object({
   provider: schema.string().default(''),
   model: schema.string().default(''),
 })
+
+/** The user-editable model selection used by all Comem compression passes. */
+const ComemModelSettings: schema<Pick<ConfigShape, 'provider' | 'model'>> =
+  schema.object({
+    provider: schema.string().default(''),
+    model: schema.string().default(''),
+  })
 function resolveConfig(config: ConfigShape = {}): ResolvedConfig {
   return {
     logicalLayerCap: config.logicalLayerCap ?? DEFAULT_LOGICAL_LAYER_CAP,
@@ -37,4 +46,10 @@ function resolveConfig(config: ConfigShape = {}): ResolvedConfig {
   }
 }
 
-export { Config, resolveConfig, type ConfigShape, type ResolvedConfig }
+export {
+  ComemModelSettings,
+  Config,
+  resolveConfig,
+  type ConfigShape,
+  type ResolvedConfig,
+}
