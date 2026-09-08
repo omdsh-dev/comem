@@ -1,3 +1,4 @@
+import * as React from 'react'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 

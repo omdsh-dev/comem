@@ -12,9 +12,8 @@ export default defineConfig({
   sourcemap: true,
   clean: false,
   deps: {
-    neverBundle: ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime'],
-    alwaysBundle: (specifier: string) =>
-      !['react', 'react/jsx-runtime', 'react/jsx-dev-runtime'].includes(specifier),
+    neverBundle: ['react'],
+    alwaysBundle: (specifier: string) => specifier !== 'react',
   },
   outputOptions: {
     entryFileNames: 'client.js',
