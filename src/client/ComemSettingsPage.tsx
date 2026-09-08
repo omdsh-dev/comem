@@ -1,11 +1,12 @@
 import * as React from 'react'
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 
 import {
   type ModelSettings,
   type SettingsScope,
   normalizedSettings,
+  settingsScopeSource,
 } from './settings.ts'
 
 interface Props {
@@ -18,7 +19,10 @@ function isModelSource(value: string): value is ModelSettings['source'] {
 }
 
 export function ComemSettingsPage({ scope, t }: Props): ReactNode {
-  const snapshot = useSyncExternalStore(scope.subscribe, scope.getSnapshot)
+  // Bind the scope's methods to the instance: React invokes the observable
+  // callbacks as bare functions and the host controller's methods need `this`.
+  const source = useMemo(() => settingsScopeSource(scope), [scope])
+  const snapshot = useSyncExternalStore(source.subscribe, source.getSnapshot)
   const resolved = normalizedSettings(snapshot.value)
   const [draft, setDraft] = useState<ModelSettings>(resolved)
   const [saving, setSaving] = useState(false)

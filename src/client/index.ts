@@ -1,6 +1,6 @@
 import { ComemSettingsPage } from './ComemSettingsPage.tsx'
 import { LOCALE_NAMESPACE, locales } from './locale.ts'
-import type { ClientContext, ModelSettings, SettingsScope } from './settings.ts'
+import type { ClientContext } from './settings.ts'
 
 export const name = 'comem'
 export const inject = ['locale', 'settingsScope', 'slots']
@@ -26,4 +26,12 @@ export function apply(ctx: ClientContext): void {
   )
 }
 
-export type { ClientContext, ModelSettings, SettingsScope }
+export type {
+  ClientContext,
+  ModelSettings,
+  SettingsPathOp,
+  SettingsScope,
+  SettingsScopeSnapshot,
+  SettingsScopeSource,
+} from './settings.ts'
+export { settingsScopeSource } from './settings.ts'

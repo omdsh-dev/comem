@@ -5,7 +5,9 @@ import type {
   ClientContext,
   ModelSettings,
   SettingsScope,
+  SettingsScopeSnapshot,
 } from '#src/client/index'
+import { settingsScopeSource } from '#src/client/settings'
 
 describe('Comem client settings page', () => {
   it('registers a settings section through the slot lifecycle', () => {
@@ -58,5 +60,39 @@ describe('Comem client settings page', () => {
     )
     disposer()
     expect(disposer).toHaveBeenCalledTimes(1)
+  })
+
+  it('binds the host scope methods React invokes unbound', () => {
+    // The host controller reads its own state through `this`; the page must
+    // hand React an observable whose callbacks already carry the instance.
+    class HostScope implements SettingsScope<ModelSettings> {
+      private readonly snapshot: SettingsScopeSnapshot<ModelSettings> = {
+        status: 'ready',
+        value: {
+          source: 'session',
+          fallbackAttempts: 1,
+          provider: '',
+          model: '',
+        },
+        writable: true,
+      }
+      private readonly listeners = new Set<() => void>()
+      getSnapshot(): SettingsScopeSnapshot<ModelSettings> {
+        return this.snapshot
+      }
+      subscribe(listener: () => void): () => void {
+        this.listeners.add(listener)
+        return () => {
+          this.listeners.delete(listener)
+        }
+      }
+      async mutate(): Promise<void> {}
+    }
+
+    const source = settingsScopeSource(new HostScope())
+    const { getSnapshot, subscribe } = source
+    expect(getSnapshot().status).toBe('ready')
+    const unsubscribe = subscribe(() => {})
+    expect(() => unsubscribe()).not.toThrow()
   })
 })
