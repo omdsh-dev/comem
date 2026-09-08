@@ -7,7 +7,7 @@ import type {
   SettingsScope,
   SettingsScopeSnapshot,
 } from '#src/client/index'
-import { settingsScopeSource } from '#src/client/settings'
+import { modelFieldState, settingsScopeSource } from '#src/client/settings'
 
 describe('Comem client settings page', () => {
   it('registers a settings section through the slot lifecycle', () => {
@@ -94,5 +94,33 @@ describe('Comem client settings page', () => {
     expect(getSnapshot().status).toBe('ready')
     const unsubscribe = subscribe(() => {})
     expect(() => unsubscribe()).not.toThrow()
+  })
+
+  it('keeps the fallback model editable while following the session model', () => {
+    // Session mode falls back to the configured provider/model, so those
+    // fields must stay editable exactly when the retry threshold is.
+    expect(modelFieldState('session', '', '')).toStrictEqual({
+      fallbackAttemptsEditable: true,
+      providerLabelKey: 'fallbackProvider',
+      modelLabelKey: 'fallbackModel',
+      fallbackTargetMissing: true,
+    })
+    expect(
+      modelFieldState('session', 'deepseek', 'deepseek-chat'),
+    ).toStrictEqual({
+      fallbackAttemptsEditable: true,
+      providerLabelKey: 'fallbackProvider',
+      modelLabelKey: 'fallbackModel',
+      fallbackTargetMissing: false,
+    })
+    expect(modelFieldState('session', 'deepseek', '  ')).toMatchObject({
+      fallbackTargetMissing: true,
+    })
+    expect(modelFieldState('configured', '', '')).toStrictEqual({
+      fallbackAttemptsEditable: false,
+      providerLabelKey: 'provider',
+      modelLabelKey: 'model',
+      fallbackTargetMissing: false,
+    })
   })
 })

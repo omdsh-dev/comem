@@ -5,6 +5,7 @@ import type { ReactNode } from 'react'
 import {
   type ModelSettings,
   type SettingsScope,
+  modelFieldState,
   normalizedSettings,
   settingsScopeSource,
 } from './settings.ts'
@@ -66,6 +67,11 @@ export function ComemSettingsPage({ scope, t }: Props): ReactNode {
     }
   }
 
+  // Provider/model are the fallback target in session mode and the primary
+  // model in configured mode: both modes edit them, only the retry threshold
+  // is session-only.
+  const fields = modelFieldState(draft.source, draft.provider, draft.model)
+
   const numberChange = (event: { target: { value: string } }) => {
     const value = Number.parseInt(event.target.value, 10)
     update(
@@ -107,7 +113,7 @@ export function ComemSettingsPage({ scope, t }: Props): ReactNode {
           min={0}
           step={1}
           value={draft.fallbackAttempts}
-          disabled={disabled || configured}
+          disabled={disabled || !fields.fallbackAttemptsEditable}
           onChange={numberChange}
           style={{ width: '100%', boxSizing: 'border-box', padding: 8 }}
         />
@@ -115,11 +121,11 @@ export function ComemSettingsPage({ scope, t }: Props): ReactNode {
 
       <label style={{ display: 'block', marginTop: 16 }}>
         <span style={{ display: 'block', marginBottom: 6 }}>
-          {t('provider')}
+          {t(fields.providerLabelKey)}
         </span>
         <input
           value={draft.provider}
-          disabled={disabled || !configured}
+          disabled={disabled}
           placeholder={t('providerPlaceholder')}
           onChange={(event) => update('provider', event.target.value)}
           style={{ width: '100%', boxSizing: 'border-box', padding: 8 }}
@@ -127,15 +133,20 @@ export function ComemSettingsPage({ scope, t }: Props): ReactNode {
       </label>
 
       <label style={{ display: 'block', marginTop: 16 }}>
-        <span style={{ display: 'block', marginBottom: 6 }}>{t('model')}</span>
+        <span style={{ display: 'block', marginBottom: 6 }}>
+          {t(fields.modelLabelKey)}
+        </span>
         <input
           value={draft.model}
-          disabled={disabled || !configured}
+          disabled={disabled}
           placeholder={t('modelPlaceholder')}
           onChange={(event) => update('model', event.target.value)}
           style={{ width: '100%', boxSizing: 'border-box', padding: 8 }}
         />
       </label>
+      {fields.fallbackTargetMissing && (
+        <p style={{ opacity: 0.72 }}>{t('fallbackMissing')}</p>
+      )}
 
       <div
         style={{
