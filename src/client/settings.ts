@@ -89,6 +89,41 @@ export interface ClientContext {
   }
 }
 
+/** How the model fields present themselves in one source mode. */
+export interface ModelFieldState {
+  /** The retry threshold only applies while following the session model. */
+  fallbackAttemptsEditable: boolean
+  /** Provider/model labels follow the field's role in the selected mode. */
+  providerLabelKey: 'provider' | 'fallbackProvider'
+  modelLabelKey: 'model' | 'fallbackModel'
+  /**
+   * Session mode needs a complete fallback target; otherwise failures surface
+   * directly.
+   */
+  fallbackTargetMissing: boolean
+}
+
+/**
+ * Resolve the model-field presentation for one source mode. Provider/model stay
+ * editable in BOTH modes: in session mode they are the fallback target the
+ * retry threshold falls back to, in configured mode they are the model Comem
+ * uses directly.
+ */
+export function modelFieldState(
+  source: ModelSource,
+  provider: string,
+  model: string,
+): ModelFieldState {
+  const configured = source === 'configured'
+  return {
+    fallbackAttemptsEditable: !configured,
+    providerLabelKey: configured ? 'provider' : 'fallbackProvider',
+    modelLabelKey: configured ? 'model' : 'fallbackModel',
+    fallbackTargetMissing:
+      !configured && (provider.trim() === '' || model.trim() === ''),
+  }
+}
+
 export function normalizedSettings(
   value: ModelSettings | undefined,
 ): ModelSettings {
