@@ -693,12 +693,18 @@ function installArchiveObserver(
   const seen = new Set<string>()
   let seeded = false
   const registry = safeGet(ctx, 'workspaceRegistry')
-  if (
-    isWorkspaceRegistry(registry)
-    && Array.isArray(registry.archivedSessionIds)
-  ) {
-    for (const id of registry.archivedSessionIds) seen.add(String(id))
-    seeded = true
+  if (isWorkspaceRegistry(registry)) {
+    try {
+      const ids = registry.archivedSessionIds
+      if (Array.isArray(ids)) {
+        for (const id of ids) seen.add(String(id))
+        seeded = true
+      }
+    } catch {
+      // The registry can be loaded before it has started (requireState()
+      // throws until its metadata is rebuilt). Then the first domain/changed
+      // workspace snapshot becomes the baseline instead, so apply never fails.
+    }
   }
   return ctx.on('domain/changed', (...args: unknown[]) => {
     const archived = archivedSessionIdsOf(args[0])

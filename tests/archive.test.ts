@@ -136,6 +136,76 @@ it('compacts a session when the workspace registry archives it', async () => {
   expect(archiveCalls).toStrictEqual(['session-archived-1'])
 })
 
+it('tolerates a workspace registry that is not started yet at plugin load', async () => {
+  const ctx = new Context()
+  ctx.provide('storageDomain', createTestStorageDomain().service)
+  let started = false
+  const archiveCalls: string[] = []
+  ctx.provide('workspaceRegistry', {
+    list: [] as string[],
+    get archivedSessionIds(): readonly string[] {
+      if (!started) throw new Error('workspace registry is not started yet')
+      return this.list
+    },
+    archiveSession: (id: string) => {
+      archiveCalls.push(id)
+      return Promise.resolve()
+    },
+  })
+  ctx.provide('sessions', {
+    get: (id: string) =>
+      id === 'session-archived-2'
+        ? {
+            header: { cwd: 'ws' },
+            requestHeader: () => ({
+              config: { provider: 'test', model: 'test-model' },
+            }),
+            deriveMessages: () => [
+              { role: 'user', content: 'archived conversation body 2' },
+            ],
+          }
+        : undefined,
+  })
+  ctx.provide('llm', {
+    stream: async function* () {
+      yield { type: 'text-delta', text: 'archived summary 2' }
+    },
+  })
+
+  // Plugin load must not throw even though the registry getter throws.
+  await ctx.plugin({ Config, apply, inject, name })
+  const engine = ctx.get('comem')
+  if (engine === undefined) throw new Error('comem engine service is missing')
+
+  // Once the registry starts: the first snapshot is the baseline (nothing to
+  // compact), then a later archive is compacted.
+  started = true
+  ctx.emit('domain/changed', {
+    domain: 'workspace',
+    table: '',
+    key: '',
+    operation: 'put',
+    value: { initialized: true, workspaceIds: [], archivedSessionIds: [] },
+  })
+  ctx.emit('domain/changed', {
+    domain: 'workspace',
+    table: '',
+    key: '',
+    operation: 'put',
+    value: {
+      initialized: true,
+      workspaceIds: [],
+      archivedSessionIds: ['session-archived-2'],
+    },
+  })
+  await vi.waitFor(async () => {
+    expect((await engine.search('archived summary 2')).length).toBeGreaterThan(
+      0,
+    )
+  })
+  expect(archiveCalls).toStrictEqual(['session-archived-2'])
+})
+
 it('drops legacy completed observation records on restart', async () => {
   const store = new MemoryComemStore()
   await store.append({
