@@ -604,6 +604,7 @@ function installNativeObserver(
       }
     }
     pending.set(compactionId, item)
+    const observationId = `native-observation:${compactionId}`
     const observationStatus =
       type === 'compaction/end' && stringField(data, 'error') !== undefined
         ? 'failed'
@@ -612,7 +613,7 @@ function installNativeObserver(
           : 'pending'
     void engine
       .observeNative({
-        id: `native-observation:${compactionId}`,
+        id: observationId,
         compactionId,
         workspaceId: item.workspaceId,
         status: observationStatus,
@@ -645,6 +646,9 @@ function installNativeObserver(
           ...(item.model === undefined ? {} : { model: item.model }),
           ...(item.usage === undefined ? {} : { usage: item.usage }),
         })
+        // The L1 node and its operation record are durable now, so the
+        // compaction's observation marker has no remaining reader.
+        .then(() => engine.pruneObservation(observationId))
         .catch(() => {})
     }
   })

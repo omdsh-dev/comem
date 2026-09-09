@@ -300,7 +300,7 @@ DSH 的实现顺序决定结算时机：
 
 comem 不调用 ctx.compaction.compactRegion()，也不调用 compactNow()。DSH 原生 provider 负责 context compact，comem 只监控其完成结果并创建 L1_node。
 
-如果 native compact 失败、被取消或没有形成有效 summary，则不创建 L1_node.mem；保留 pending/failed 来源记录，供恢复或诊断。
+如果 native compact 失败、被取消或没有形成有效 summary，则不创建 L1_node.mem；保留 pending/failed 来源记录，供恢复或诊断。配对成功并写入 L1_node 后，删除该 compactionId 的 observation 记录（complete 状态本身不落盘）；重复事件由 operation 记录保证幂等，因此完成的 compaction 不再需要 observation。
 
 ### 3.2 Session 归档时的 archive compact
 
@@ -846,6 +846,7 @@ L2_node 完成后进入 L3 层时，把上面流程中的 L1_node/L2_node 整体
 - Record、edge 和 mem revision 都必须可从 append-only 记录重放；
 - 同一 workspace 子树的 active parent node 追加操作串行化；
 - summary 到 replacement 之间退出时，保留 observation pending，启动后继续配对；
+- 配对成功写入 L1_node 后清理该 compaction 的 observation 记录，failed 保留供诊断；
 - L2 层满层 compact 失败时保留 L2_node 的 children、Records 和已产生的 mem revision，L2_node.mem 标记 pending/failed；
 - abs 失败只影响 abs，不回滚 mem、Record 或父子关系。
 

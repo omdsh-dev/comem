@@ -40,3 +40,56 @@ it('persists native failed observations for restart recovery', async () => {
     { compactionId: 'c-1', status: 'failed', error: 'provider failed' },
   ])
 })
+
+it('writes no observation marker for a completed compaction', async () => {
+  const store = new MemoryComemStore()
+  const engine = new ComemEngine({ store })
+  await engine.observeNative({
+    id: 'native-observation:c-2',
+    compactionId: 'c-2',
+    workspaceId: 'ws',
+    status: 'complete',
+  })
+  expect(engine.snapshot().observations).toStrictEqual([])
+  expect(
+    (await store.read()).some((event) => event.type === 'observation'),
+  ).toBe(false)
+})
+
+it('prunes a settled compaction observation from storage', async () => {
+  const store = new MemoryComemStore()
+  const engine = new ComemEngine({ store })
+  await engine.observeNative({
+    id: 'native-observation:c-3',
+    compactionId: 'c-3',
+    workspaceId: 'ws',
+    status: 'pending',
+    sequence: 7,
+  })
+  expect(engine.snapshot().observations).toHaveLength(1)
+  await engine.pruneObservation('native-observation:c-3')
+  expect(engine.snapshot().observations).toStrictEqual([])
+  expect(
+    (await store.read()).some((event) => event.type === 'observation'),
+  ).toBe(false)
+})
+
+it('drops legacy completed observation records on restart', async () => {
+  const store = new MemoryComemStore()
+  await store.append({
+    type: 'observation',
+    observation: {
+      id: 'native-observation:c-4',
+      compactionId: 'c-4',
+      workspaceId: 'ws',
+      status: 'complete',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+  })
+  const reopened = new ComemEngine({ store })
+  await reopened.waitReady()
+  expect(reopened.snapshot().observations).toStrictEqual([])
+  expect(
+    (await store.read()).some((event) => event.type === 'observation'),
+  ).toBe(false)
+})

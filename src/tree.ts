@@ -391,6 +391,15 @@ export class ComemEngine {
     }
   }
 
+  /**
+   * Persist one native-compaction observation. Completed compactions are not
+   * written: their L1 node, mem revision, and operation record already carry
+   * the result, so the marker would only live until {@link pruneObservation}
+   * removes it. Pending and failed records stay durable for recovery and
+   * diagnosis.
+   *
+   * @param input - Observation identity, scope, status, and event sequence.
+   */
   async observeNative(input: {
     id: string
     compactionId: string
@@ -399,11 +408,26 @@ export class ComemEngine {
     sequence?: number
     error?: string | undefined
   }): Promise<void> {
+    if (input.status === 'complete') return
     await this.serial(async () => {
       const observation: ComemObservation = { ...input, createdAt: this.now() }
       const event: ComemEvent = { type: 'observation', observation }
       await this.options.store.append(event)
       this.apply(event)
+    })
+  }
+
+  /**
+   * Drop one compaction's observation records once its L1 node is durable. The
+   * operation record keeps replayed events idempotent, so the marker is only
+   * needed while the compaction is incomplete.
+   *
+   * @param id - Observation id (`native-observation:<compactionId>`).
+   */
+  async pruneObservation(id: string): Promise<void> {
+    await this.serial(async () => {
+      await this.options.store.removeObservations?.(id)
+      this.state.observations.delete(id)
     })
   }
 
@@ -419,6 +443,12 @@ export class ComemEngine {
     for (const event of await this.options.store.read()) {
       this.apply(event)
     }
+    // Completed markers written before the pruning contract carry no reader
+    // either; drop them so the store only keeps incomplete compactions.
+    const legacy = [...this.state.observations.values()]
+      .filter((observation) => observation.status === 'complete')
+      .map((observation) => observation.id)
+    await Promise.all(legacy.map((id) => this.pruneObservation(id)))
   }
   private apply(event: ComemEvent): void {
     if (event.type === 'node') {

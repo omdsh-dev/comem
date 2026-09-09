@@ -5,11 +5,19 @@ import type { ComemEvent, ComemNode, ComemRecord, ComemSource } from './tree.ts'
 export interface ComemStore {
   append(event: ComemEvent): Promise<void>
   read(): Promise<ComemEvent[]>
+  /**
+   * Drop one compaction's observation records. A completed compaction keeps no
+   * recovery marker: its L1 node, mem revision, and operation record are the
+   * durable truth, and the operation record keeps replayed events idempotent.
+   * Stores without this capability simply keep the records.
+   */
+  removeObservations?(id: string): Promise<void>
 }
 export interface ComemDomainTable {
   get(key: string): ComemEvent | undefined
   entries(): IterableIterator<[string, ComemEvent]>
   put(key: string, value: ComemEvent): Promise<void>
+  delete(key: string): Promise<boolean>
 }
 export interface ComemDomain {
   table(name: string): ComemDomainTable
@@ -39,6 +47,16 @@ export class DomainComemStore implements ComemStore {
         key = 'event-' + String(this.nextSequence).padStart(20, '0')
       } while (this.events.get(key) !== undefined)
       await this.events.put(key, structuredClone(checked))
+    })
+  }
+  removeObservations(id: string): Promise<void> {
+    return this.serialize(async () => {
+      const keys: string[] = []
+      for (const [key, event] of this.events.entries()) {
+        if (event.type === 'observation' && event.observation.id === id)
+          keys.push(key)
+      }
+      await Promise.all(keys.map((key) => this.events.delete(key)))
     })
   }
   read(): Promise<ComemEvent[]> {
@@ -71,6 +89,21 @@ export class MemoryComemStore implements ComemStore {
     const checked = parseEvent(event)
     const result = this.writes.then(() => {
       this.events.push(structuredClone(checked))
+      return undefined
+    })
+    this.writes = result.then(
+      () => undefined,
+      () => undefined,
+    )
+    return result
+  }
+  removeObservations(id: string): Promise<void> {
+    const result = this.writes.then(() => {
+      for (let index = this.events.length - 1; index >= 0; index -= 1) {
+        const event = this.events[index]
+        if (event?.type === 'observation' && event.observation.id === id)
+          this.events.splice(index, 1)
+      }
       return undefined
     })
     this.writes = result.then(

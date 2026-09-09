@@ -17,6 +17,7 @@ function domainFrom(
         values.set(key, value)
         return Promise.resolve()
       }),
+    delete: (key: string) => Promise.resolve(values.delete(key)),
   }
   return { table: () => table }
 }

@@ -18,6 +18,7 @@ export function createTestStorageDomain() {
       values.set(key, value)
       return Promise.resolve()
     },
+    delete: (key) => Promise.resolve(values.delete(key)),
   }
   const close = vi.fn<() => Promise<void>>(async () => {})
   const open = vi.fn<(spec: unknown) => Promise<ComemDomain>>(

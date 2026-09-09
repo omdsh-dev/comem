@@ -184,6 +184,7 @@ describe('comem tree', () => {
           values.set(key, value)
           return Promise.resolve()
         },
+        delete: (key: string) => Promise.resolve(values.delete(key)),
       }),
     }
     const store = new DomainComemStore(domain)
