@@ -11,23 +11,27 @@ const plugin = { Config, apply, inject, name }
 /** Create the minimal DSH storage-domain service used by real plugin mounts. */
 export function createTestStorageDomain() {
   const values = new Map<string, ComemEvent>()
-  const table: ComemDomainTable = {
-    get: (key) => values.get(key),
-    entries: () => values.entries(),
-    put: (key, value) => {
-      values.set(key, value)
-      return Promise.resolve()
-    },
-    delete: (key) => Promise.resolve(values.delete(key)),
+  const observations = new Map<string, ComemEvent>()
+  const tableFor = (tableName: string): ComemDomainTable => {
+    const records = tableName === 'events' ? values : observations
+    return {
+      get: (key) => records.get(key),
+      entries: () => records.entries(),
+      put: (key, value) => {
+        records.set(key, value)
+        return Promise.resolve()
+      },
+      delete: (key) => Promise.resolve(records.delete(key)),
+    }
   }
   const close = vi.fn<() => Promise<void>>(async () => {})
   const open = vi.fn<(spec: unknown) => Promise<ComemDomain>>(
     async (_spec: unknown): Promise<ComemDomain> => ({
-      table: () => table,
+      table: tableFor,
       close,
     }),
   )
-  return { service: { open }, values, open, close }
+  return { service: { open }, values, observations, open, close }
 }
 
 interface PluginHarness {

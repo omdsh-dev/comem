@@ -7,20 +7,36 @@ import type { ComemDomain, ComemDomainTable } from '#src/storage'
 function domainFrom(
   values: Map<string, ComemEvent>,
   put?: ComemDomainTable['put'],
+  observations = new Map<string, ComemEvent>(),
 ): ComemDomain {
-  const table: ComemDomainTable = {
-    get: (key: string) => values.get(key),
-    entries: () => values.entries(),
-    put:
-      put
-      ?? ((key: string, value: ComemEvent) => {
-        values.set(key, value)
-        return Promise.resolve()
-      }),
-    delete: (key: string) => Promise.resolve(values.delete(key)),
+  const tableFor = (name: string): ComemDomainTable => {
+    const records = name === 'events' ? values : observations
+    return {
+      get: (key: string) => records.get(key),
+      entries: () => records.entries(),
+      put:
+        put !== undefined && name === 'events'
+          ? put
+          : (key: string, value: ComemEvent) => {
+              records.set(key, value)
+              return Promise.resolve()
+            },
+      delete: (key: string) => Promise.resolve(records.delete(key)),
+    }
   }
-  return { table: () => table }
+  return { table: tableFor }
 }
+
+const observationMarker = (status: 'pending' | 'failed'): ComemEvent => ({
+  type: 'observation',
+  observation: {
+    id: 'native-observation:c-9',
+    compactionId: 'c-9',
+    workspaceId: 'ws',
+    status,
+    createdAt: '2026-01-01T00:00:00.000Z',
+  },
+})
 
 const nodeEvent = (
   id: string,
@@ -121,5 +137,48 @@ describe('comem durable stores', () => {
         event.type === 'node' ? event.node.id : '',
       ),
     ).toEqual(['ok'])
+  })
+
+  it('keeps compaction markers in their own table, one document per compaction', async () => {
+    const values = new Map<string, ComemEvent>()
+    const observations = new Map<string, ComemEvent>()
+    const store = new DomainComemStore(
+      domainFrom(values, undefined, observations),
+    )
+    await store.append(observationMarker('pending'))
+    await store.append(observationMarker('failed'))
+    // The marker never enters the tree table, and repeated updates overwrite
+    // one path-safe document instead of appending a new one.
+    expect(values.size).toBe(0)
+    expect([...observations.keys()]).toStrictEqual(['native-observation_c-9'])
+    await store.removeObservations('native-observation:c-9')
+    expect(observations.size).toBe(0)
+    expect(
+      (await store.read()).filter((event) => event.type === 'observation'),
+    ).toHaveLength(0)
+  })
+
+  it('reads and prunes legacy markers that still live in the events table', async () => {
+    const values = new Map<string, ComemEvent>([
+      [
+        'event-00000000000000000001',
+        {
+          type: 'observation',
+          observation: {
+            id: 'native-observation:c-8',
+            compactionId: 'c-8',
+            workspaceId: 'ws',
+            status: 'failed',
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+        },
+      ],
+    ])
+    const store = new DomainComemStore(domainFrom(values))
+    expect(
+      (await store.read()).filter((event) => event.type === 'observation'),
+    ).toHaveLength(1)
+    await store.removeObservations('native-observation:c-8')
+    expect(values.size).toBe(0)
   })
 })

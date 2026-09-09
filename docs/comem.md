@@ -806,7 +806,7 @@ Record 是父层保留新内容的关键记录。它必须保存 child node、ch
 
 ### 9.2 落盘方案
 
-采用方案 A，Comem 强制通过 `ctx.storageDomain` 使用 DSH_HOME 下的 `comem` 存储域；DSH 默认 JSON backend 的记录路径为 `$DSH_HOME/storages/comem/events/`。runtime 必须在创建 engine 前成功打开该 domain；如果 `storageDomain` 服务不存在、打开失败或返回不可用 domain，插件创建失败并停止，不使用任何文件 fallback。逻辑记录至少包括：
+采用方案 A，Comem 强制通过 `ctx.storageDomain` 使用 DSH_HOME 下的 `comem` 存储域；DSH 默认 JSON backend 的路径为 `$DSH_HOME/storages/comem/events/`（记忆树事件）和 `$DSH_HOME/storages/comem/observations/`（压缩恢复标记），每个 storage table 一个目录。runtime 必须在创建 engine 前成功打开该 domain；如果 `storageDomain` 服务不存在、打开失败或返回不可用 domain，插件创建失败并停止，不使用任何文件 fallback。逻辑记录至少包括：
 
 - nodes：节点元数据、所属 layer、children、active/sealed 状态；
 - mem revisions：每次独立 compact 产生的节点 mem；

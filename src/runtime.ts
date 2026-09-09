@@ -67,7 +67,13 @@ const comemDomainSpec = {
   name: 'comem',
   version: 1,
   layout: 'per-record' as const,
-  tables: { events: { valueSchema: { parse: (value: unknown) => value } } },
+  // One directory per table under the domain root: `events` is the durable
+  // memory tree (node/mem/record/abs/edge/note/operation replay log), while
+  // `observations` holds only the native-compaction recovery markers.
+  tables: {
+    events: { valueSchema: { parse: (value: unknown) => value } },
+    observations: { valueSchema: { parse: (value: unknown) => value } },
+  },
 }
 async function openStorageDomain(ctx: Context): Promise<ComemDomain> {
   const candidate =

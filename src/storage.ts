@@ -24,13 +24,24 @@ export interface ComemDomain {
   close?: () => Promise<void>
 }
 
-/** Required adapter for the DSH storageDomain's events table. */
+/**
+ * Required adapter for the DSH storageDomain tables: `events` carries the
+ * memory tree, `observations` carries the compaction recovery markers. One
+ * table is one directory under the domain root, so replay-only bookkeeping
+ * stays out of the tree's folder.
+ */
 export class DomainComemStore implements ComemStore {
   private readonly events: ComemDomainTable
+  private readonly observations: ComemDomainTable
   private nextSequence = 0
   private writes: Promise<void> = Promise.resolve()
-  constructor(domain: ComemDomain, tableName = 'events') {
+  constructor(
+    domain: ComemDomain,
+    tableName = 'events',
+    observationTableName = 'observations',
+  ) {
     this.events = domain.table(tableName)
+    this.observations = domain.table(observationTableName)
     for (const [key, event] of orderedEntries(this.events)) {
       parseEvent(event)
       const match = /^event-(\d+)$/.exec(key)
@@ -41,6 +52,15 @@ export class DomainComemStore implements ComemStore {
   append(event: ComemEvent): Promise<void> {
     const checked = parseEvent(event)
     return this.serialize(async () => {
+      // Observation markers are keyed by compaction: one document that is
+      // overwritten in place, never a growing sequence of pending snapshots.
+      if (checked.type === 'observation') {
+        await this.observations.put(
+          observationKey(checked.observation.id),
+          structuredClone(checked),
+        )
+        return
+      }
       let key: string
       do {
         this.nextSequence += 1
@@ -51,20 +71,26 @@ export class DomainComemStore implements ComemStore {
   }
   removeObservations(id: string): Promise<void> {
     return this.serialize(async () => {
-      const keys: string[] = []
+      await this.observations.delete(observationKey(id))
+      // Markers written before the table split still live in the events table.
+      const legacy: string[] = []
       for (const [key, event] of this.events.entries()) {
         if (event.type === 'observation' && event.observation.id === id)
-          keys.push(key)
+          legacy.push(key)
       }
-      await Promise.all(keys.map((key) => this.events.delete(key)))
+      await Promise.all(legacy.map((key) => this.events.delete(key)))
     })
   }
   read(): Promise<ComemEvent[]> {
-    return Promise.resolve(
-      orderedEntries(this.events).map(([, event]) =>
+    const markers = [...this.observations.entries()].map(([, event]) =>
+      structuredClone(parseEvent(event)),
+    )
+    return Promise.resolve([
+      ...orderedEntries(this.events).map(([, event]) =>
         structuredClone(parseEvent(event)),
       ),
-    )
+      ...markers,
+    ])
   }
   private serialize(task: () => Promise<void>): Promise<void> {
     const result = this.writes.then(task, task)
@@ -74,6 +100,11 @@ export class DomainComemStore implements ComemStore {
     )
     return result
   }
+}
+
+/** Per-record key of one observation id (path-safe: the medium rejects `:`). */
+function observationKey(id: string): string {
+  return id.replace(/[^a-zA-Z0-9_-]/g, '_')
 }
 
 function orderedEntries(table: ComemDomainTable): [string, ComemEvent][] {
@@ -88,6 +119,16 @@ export class MemoryComemStore implements ComemStore {
   append(event: ComemEvent): Promise<void> {
     const checked = parseEvent(event)
     const result = this.writes.then(() => {
+      if (checked.type === 'observation') {
+        const index = this.events.findIndex(
+          (candidate) =>
+            candidate.type === 'observation'
+            && candidate.observation.id === checked.observation.id,
+        )
+        if (index >= 0) this.events[index] = structuredClone(checked)
+        else this.events.push(structuredClone(checked))
+        return undefined
+      }
       this.events.push(structuredClone(checked))
       return undefined
     })

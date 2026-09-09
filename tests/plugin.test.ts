@@ -176,16 +176,20 @@ describe('comem tree', () => {
 
   it('uses a storage-domain table with idempotent event keys', async () => {
     const values = new Map<string, import('#src/index').ComemEvent>()
+    const observations = new Map<string, import('#src/index').ComemEvent>()
     const domain = {
-      table: () => ({
-        get: (key: string) => values.get(key),
-        entries: () => values.entries(),
-        put: (key: string, value: import('#src/index').ComemEvent) => {
-          values.set(key, value)
-          return Promise.resolve()
-        },
-        delete: (key: string) => Promise.resolve(values.delete(key)),
-      }),
+      table: (name: string) => {
+        const records = name === 'events' ? values : observations
+        return {
+          get: (key: string) => records.get(key),
+          entries: () => records.entries(),
+          put: (key: string, value: import('#src/index').ComemEvent) => {
+            records.set(key, value)
+            return Promise.resolve()
+          },
+          delete: (key: string) => Promise.resolve(records.delete(key)),
+        }
+      },
     }
     const store = new DomainComemStore(domain)
     const engine = new ComemEngine({ store })
