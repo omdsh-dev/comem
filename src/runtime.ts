@@ -5,6 +5,15 @@ declare module 'cordis' {
   interface Events {
     'session/event': (...args: unknown[]) => void
     'session/archive': (...args: unknown[]) => void
+    /**
+     * Storage-domain change notification; comem watches the workspace archive
+     * set.
+     */
+    'domain/changed': (change: unknown) => void
+  }
+  interface Context {
+    /** The live comem engine, provided by this plugin's activation. */
+    comem: ComemEngine
   }
 }
 
@@ -186,6 +195,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const nativeDispose = installNativeObserver(host, runtime.engine)
   if (nativeDispose !== undefined) {
     disposers.push(nativeDispose)
+  }
+  const archiveDispose = installArchiveObserver(host, runtime.engine)
+  if (archiveDispose !== undefined) {
+    disposers.push(archiveDispose)
   }
   ctx.effect(
     () => async () => {
@@ -475,6 +488,8 @@ export async function archiveSession(
 }
 interface WorkspaceRegistry {
   archiveSession: (sessionId: string) => Promise<void>
+  /** Registry-global archive set, exposed by the durable workspace state. */
+  readonly archivedSessionIds?: readonly string[]
 }
 function isWorkspaceRegistry(value: unknown): value is WorkspaceRegistry {
   return isRecord(value) && typeof value.archiveSession === 'function'
@@ -659,6 +674,70 @@ function installNativeObserver(
     }
   })
 }
+/**
+ * Compact every session the Workspace registry archives. The registry keeps its
+ * archive set in the `workspace` storage domain's global slot, so the durable
+ * `domain/changed` event is the trigger — no polling and no patch of the
+ * registry service. Sessions already archived when this plugin starts are the
+ * baseline, not a backfill.
+ *
+ * @param ctx - Host context carrying the registry and the domain event.
+ * @param engine - Comem engine that creates the archive L1 node.
+ * @returns Disposer removing the listener, or undefined without an event bus.
+ */
+function installArchiveObserver(
+  ctx: ComemContext,
+  engine: ComemEngine,
+): (() => void) | undefined {
+  if (typeof ctx.on !== 'function') return undefined
+  const seen = new Set<string>()
+  let seeded = false
+  const registry = safeGet(ctx, 'workspaceRegistry')
+  if (
+    isWorkspaceRegistry(registry)
+    && Array.isArray(registry.archivedSessionIds)
+  ) {
+    for (const id of registry.archivedSessionIds) seen.add(String(id))
+    seeded = true
+  }
+  return ctx.on('domain/changed', (...args: unknown[]) => {
+    const archived = archivedSessionIdsOf(args[0])
+    if (archived === undefined) return
+    if (!seeded) {
+      // The first observed snapshot is the baseline.
+      seeded = true
+      for (const id of archived) seen.add(id)
+      return
+    }
+    for (const id of archived) {
+      if (seen.has(id)) continue
+      seen.add(id)
+      void archiveSession(ctx, engine, id).catch((error: unknown) => {
+        ctx.logger.warn(
+          `comem: archive compact of ${id} failed: ${String(error)}`,
+        )
+      })
+    }
+  })
+}
+
+/** Read the archived session ids out of one workspace-domain global snapshot. */
+function archivedSessionIdsOf(change: unknown): string[] | undefined {
+  if (!isRecord(change)) return undefined
+  if (
+    change.domain !== 'workspace'
+    || change.table !== ''
+    || change.operation !== 'put'
+  )
+    return undefined
+  const state = change.value
+  if (!isRecord(state) || !Array.isArray(state.archivedSessionIds))
+    return undefined
+  return state.archivedSessionIds.filter(
+    (id): id is string => typeof id === 'string',
+  )
+}
+
 function textFromBlocks(value: unknown): string {
   if (!Array.isArray(value)) return ''
   return value

@@ -317,6 +317,8 @@ comem 使用 ctx.llm 自己执行 archive compact
 └── L1_node.mem = archive compact result
 ~~~
 
+触发方式：workspace registry 把归档集合放在 `workspace` 存储域的 global slot，每次写入都会发出 `domain/changed`。comem 监听该事件，只处理 `domain = workspace`、`table = ''`、`operation = put`，从快照读取 `archivedSessionIds`，对新增的 id 执行一次 archive compact（`operationId = archive:<sessionId>`，重复事件幂等）。插件启动时以当时的 `archivedSessionIds` 为基线，不回填历史归档。
+
 archive compact 与 context compact 在节点语义上完全相同，区别只在 source.kind。archive compact 不是只生成 abs，也不是复制已有 L1_node.abs。
 
 构造 archive compact 的素材时：

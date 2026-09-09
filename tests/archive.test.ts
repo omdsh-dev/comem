@@ -1,7 +1,17 @@
 import { Context } from 'cordis'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 
-import { ComemEngine, MemoryComemStore, archiveSession } from '#src/index'
+import {
+  ComemEngine,
+  Config,
+  MemoryComemStore,
+  apply,
+  archiveSession,
+  inject,
+  name,
+} from '#src/index'
+
+import { createTestStorageDomain } from './harness.ts'
 
 it('archives through the real workspace registry seam before compacting', async () => {
   const ctx = new Context()
@@ -72,6 +82,58 @@ it('prunes a settled compaction observation from storage', async () => {
   expect(
     (await store.read()).some((event) => event.type === 'observation'),
   ).toBe(false)
+})
+
+it('compacts a session when the workspace registry archives it', async () => {
+  const ctx = new Context()
+  ctx.provide('storageDomain', createTestStorageDomain().service)
+  const archiveCalls: string[] = []
+  ctx.provide('workspaceRegistry', {
+    archivedSessionIds: [] as readonly string[],
+    archiveSession: (id: string) => {
+      archiveCalls.push(id)
+      return Promise.resolve()
+    },
+  })
+  ctx.provide('sessions', {
+    get: (id: string) =>
+      id === 'session-archived-1'
+        ? {
+            header: { cwd: 'ws' },
+            requestHeader: () => ({
+              config: { provider: 'test', model: 'test-model' },
+            }),
+            deriveMessages: () => [
+              { role: 'user', content: 'archived conversation body' },
+            ],
+          }
+        : undefined,
+  })
+  ctx.provide('llm', {
+    stream: async function* () {
+      yield { type: 'text-delta', text: 'archived summary' }
+    },
+  })
+
+  await ctx.plugin({ Config, apply, inject, name })
+  const engine = ctx.get('comem')
+  if (engine === undefined) throw new Error('comem engine service is missing')
+  ctx.emit('domain/changed', {
+    domain: 'workspace',
+    table: '',
+    key: '',
+    operation: 'put',
+    value: {
+      initialized: true,
+      workspaceIds: [],
+      archivedSessionIds: ['session-archived-1'],
+    },
+  })
+
+  await vi.waitFor(async () => {
+    expect((await engine.search('archived summary')).length).toBeGreaterThan(0)
+  })
+  expect(archiveCalls).toStrictEqual(['session-archived-1'])
 })
 
 it('drops legacy completed observation records on restart', async () => {
